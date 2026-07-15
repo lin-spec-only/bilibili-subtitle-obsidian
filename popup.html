@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>B站字幕提取器</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="app-header">
+        <div class="logo" aria-hidden="true"><span>字</span></div>
+        <div>
+          <h1>B站字幕提取器</h1>
+          <p>提取字幕，直接存入 Obsidian</p>
+        </div>
+      </header>
+
+      <form id="extract-form" class="extract-form">
+        <label for="video-url">视频链接</label>
+        <div class="input-row">
+          <input
+            id="video-url"
+            name="video-url"
+            type="text"
+            inputmode="url"
+            autocomplete="off"
+            placeholder="粘贴 bilibili.com、b23.tv 或 BV 号"
+            required
+          />
+          <button id="extract-button" class="button button-primary" type="submit">
+            提取
+          </button>
+        </div>
+        <p class="privacy-hint">沿用当前 Edge 的 B站登录态，不读取或保存 Cookie。</p>
+      </form>
+
+      <section id="status" class="status" role="status" aria-live="polite" hidden></section>
+
+      <section id="result" class="result" hidden>
+        <div class="video-card">
+          <div>
+            <p class="eyebrow">当前视频</p>
+            <h2 id="video-title"></h2>
+            <p id="video-meta" class="video-meta"></p>
+          </div>
+          <a id="source-link" class="source-link" target="_blank" rel="noreferrer">原视频</a>
+        </div>
+
+        <div class="selectors">
+          <label>
+            <span>分P <small>切换后自动提取</small></span>
+            <select id="part-select"></select>
+          </label>
+          <label id="language-field">
+            <span>字幕轨</span>
+            <select id="language-select"></select>
+          </label>
+        </div>
+
+        <div id="empty-state" class="empty-state" hidden>
+          <strong>这个分P没有可用字幕</strong>
+          <p>仅能提取 B 站已提供的官方或 AI 字幕；没有字幕的视频需要另做语音转写。</p>
+        </div>
+
+        <pre id="transcript" class="transcript" tabindex="0"></pre>
+
+        <div id="actions" class="actions">
+          <div class="vault-target">
+            <span>保存到</span>
+            <strong id="vault-status">首次添加时选择 Vault 根目录</strong>
+            <button id="change-vault" type="button" hidden>更改</button>
+          </div>
+          <button id="save-obsidian" class="button button-obsidian" type="button">
+            保存到 Obsidian
+          </button>
+          <button id="open-obsidian" class="button button-obsidian" type="button" hidden>
+            打开 Obsidian
+          </button>
+          <button id="copy-markdown" class="button button-secondary" type="button">
+            复制笔记
+          </button>
+          <button id="copy-plain" class="button button-secondary" type="button">
+            复制纯文本
+          </button>
+          <button id="download-markdown" class="button button-ghost" type="button">
+            下载 .md
+          </button>
+          <button id="download-srt" class="button button-ghost" type="button">
+            下载 .srt
+          </button>
+        </div>
+        <p id="action-feedback" class="action-feedback" role="status" aria-live="polite"></p>
+      </section>
+
+    </main>
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>

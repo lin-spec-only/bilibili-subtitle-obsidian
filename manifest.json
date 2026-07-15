@@ -1,0 +1,27 @@
+{
+  "manifest_version": 3,
+  "name": "B站字幕提取器",
+  "version": "0.3.8",
+  "description": "复用当前 Edge 的 B 站登录态，提取官方或 AI 字幕并导出为笔记格式。",
+  "minimum_chrome_version": "102",
+  "permissions": [
+    "clipboardWrite",
+    "scripting",
+    "storage",
+    "tabs"
+  ],
+  "host_permissions": [
+    "https://bilibili.com/*",
+    "https://*.bilibili.com/*",
+    "https://b23.tv/*",
+    "https://*.hdslb.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "提取 B 站字幕",
+    "default_popup": "popup.html"
+  }
+}

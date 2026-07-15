@@ -1,0 +1,9 @@
+{
+  "name": "bilibili-subtitle-edge",
+  "version": "0.3.8",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/core.test.mjs tests/vault.test.mjs tests/extract-state.test.mjs tests/background.test.mjs tests/manifest.test.mjs tests/obsidian-uri.test.mjs tests/obsidian-handoff.test.mjs"
+  }
+}
