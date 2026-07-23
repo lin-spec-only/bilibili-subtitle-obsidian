@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 
 async function readManifest() {
   return JSON.parse(await readFile(new URL("../manifest.json", import.meta.url), "utf8"));
@@ -33,4 +33,16 @@ test("keeps the extension and package versions aligned for releases", async () =
   const manifest = await readManifest();
   const packageJson = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
   assert.equal(manifest.version, packageJson.version);
+});
+
+test("declares all extension icon sizes and ships the referenced files", async () => {
+  const manifest = await readManifest();
+  for (const size of ["16", "32", "48", "128"]) {
+    const iconPath = manifest.icons?.[size];
+    assert.equal(typeof iconPath, "string");
+    await access(new URL(`../${iconPath}`, import.meta.url));
+  }
+  for (const size of ["16", "32", "48"]) {
+    assert.equal(manifest.action?.default_icon?.[size], manifest.icons[size]);
+  }
 });
