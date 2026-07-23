@@ -48,8 +48,15 @@ test("accepts only video pages for the current-tab shortcut", () => {
     isSupportedBilibiliVideoInput("https://www.bilibili.com/video/BV1xx411c7mD?p=2"),
     true
   );
+  assert.equal(
+    isSupportedBilibiliVideoInput(
+      "https://www.bilibili.com/list/watchlater?oid=116465890106830&bvid=BV17xo9BsEnx"
+    ),
+    true
+  );
   assert.equal(isSupportedBilibiliVideoInput("https://b23.tv/AbCd12"), true);
   assert.equal(isSupportedBilibiliVideoInput("https://www.bilibili.com/"), false);
+  assert.equal(isSupportedBilibiliVideoInput("https://www.bilibili.com/list/watchlater"), false);
   assert.equal(isSupportedBilibiliVideoInput("https://space.bilibili.com/1"), false);
 });
 
@@ -106,6 +113,12 @@ test("识别分享文本、短链和裸 BV 号", () => {
   assert.equal(
     normalizeVideoInput("https://www.bilibili.com/video/BV1xx411c7mD?p=2"),
     "https://www.bilibili.com/video/BV1xx411c7mD?p=2"
+  );
+  assert.equal(
+    normalizeVideoInput(
+      "https://www.bilibili.com/list/watchlater?oid=116465890106830&bvid=BV17xo9BsEnx&spm_id_from=333.1007"
+    ),
+    "https://www.bilibili.com/video/BV17xo9BsEnx"
   );
 });
 

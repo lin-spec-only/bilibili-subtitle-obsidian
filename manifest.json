@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "B站字幕提取器",
-  "version": "0.4.6",
+  "version": "0.4.7",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAsDpEwRgIIjWdJQA8574QihyR7YadO5Sl6owWOAV9urxZ8yFVgJlubenRyVWqf3vqpQ5I/nPjTofdRIaB7g2lSqbuqrjGVwUYLWo81TBecBv66iwuZB6+n1l3Jm+r0cjD94JLVW/kdXS+ctNZcRYADAt3Edrq6jG3yerMTYGFE2lKNf+8DBUDOFy7VYSLXaG2u8xs+53voNQK63ERfHeE6UNt59Kdd2nDl3jS/Ab/AiV1xa9uxMVObLqwfxJp11blGqGKoADvBWHiiGciTv3MiA0KWC5zom7emoa7lSJl0SE4OIoEeigEHaZ7vqMTEKsv/2oTeLQ7WFa0S6ANHnxXpQIDAQAB",
   "description": "优先提取 B 站字幕，无字幕时可调用本机语音识别并导出为笔记。",
   "minimum_chrome_version": "102",

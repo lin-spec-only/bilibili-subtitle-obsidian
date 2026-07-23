@@ -66,7 +66,7 @@ test("uses the current cid player endpoint when video metadata omits a subtitle 
 
   try {
     const response = await createIsolatedPageCollector()(null);
-    assert.equal(response.ok, true);
+    assert.equal(response.ok, true, response.error);
     assert.equal(response.result.tracks.length, 1);
     assert.equal(response.result.tracks[0].subtitleUrl, "https://aisubtitle.hdslb.com/track.json");
     assert.deepEqual(response.result.tracks[0].body, []);
@@ -77,6 +77,79 @@ test("uses the current cid player endpoint when video metadata omits a subtitle 
     assert.deepEqual(hydrated.tracks[0].body, [
       { from: 0, to: 1, content: "Fallback subtitle" }
     ]);
+  } finally {
+    globalThis.window = previousWindow;
+    globalThis.document = previousDocument;
+    globalThis.fetch = previousFetch;
+  }
+});
+
+test("reads the current video from a watch-later URL instead of stale page state", async () => {
+  const previousWindow = globalThis.window;
+  const previousDocument = globalThis.document;
+  const previousFetch = globalThis.fetch;
+
+  globalThis.window = {
+    location: {
+      href: "https://www.bilibili.com/list/watchlater?oid=116465890106830&bvid=BV17xo9BsEnx"
+    },
+    __INITIAL_STATE__: {
+      bvid: "BV1C2Ny67E93",
+      videoData: { bvid: "BV1C2Ny67E93", aid: 999 }
+    }
+  };
+  globalThis.document = { title: "【城】开源 Agent 之王 Hermes，到底厉害在哪？" };
+  globalThis.fetch = async (url) => {
+    const href = String(url);
+    let payload;
+    if (href.includes("/x/web-interface/view?")) {
+      assert.match(href, /bvid=BV17xo9BsEnx/);
+      assert.doesNotMatch(href, /BV1C2Ny67E93/);
+      payload = {
+        code: 0,
+        data: {
+          bvid: "BV17xo9BsEnx",
+          aid: 116465890106830,
+          title: "【城】开源 Agent 之王 Hermes，到底厉害在哪？",
+          duration: 792,
+          owner: { name: "Creator" },
+          pages: [{ page: 1, cid: 37822597056, part: "P1", duration: 792 }]
+        }
+      };
+    } else if (href.includes("/x/player/")) {
+      assert.match(href, /bvid=BV17xo9BsEnx/);
+      assert.match(href, /cid=37822597056/);
+      payload = {
+        code: 0,
+        data: {
+          subtitle: {
+            subtitles: [
+              {
+                id: 1,
+                lan: "zh-CN",
+                lan_doc: "中文",
+                subtitle_url: "//aisubtitle.hdslb.com/hermes.json"
+              }
+            ]
+          }
+        }
+      };
+    } else {
+      throw new Error(`unexpected request: ${href}`);
+    }
+    return { ok: true, async json() { return payload; } };
+  };
+
+  try {
+    const response = await createIsolatedPageCollector()(null);
+    assert.equal(response.ok, true, response.error);
+    assert.equal(response.result.video.bvid, "BV17xo9BsEnx");
+    assert.equal(response.result.selectedPage.cid, "37822597056");
+    assert.equal(response.result.tracks.length, 1);
+    assert.equal(
+      response.result.tracks[0].subtitleUrl,
+      "https://aisubtitle.hdslb.com/hermes.json"
+    );
   } finally {
     globalThis.window = previousWindow;
     globalThis.document = previousDocument;

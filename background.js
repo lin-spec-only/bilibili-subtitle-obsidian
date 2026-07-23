@@ -343,8 +343,9 @@ export async function collectSubtitleInPage(requestedPart) {
     };
 
     const href = window.location.href;
+    const currentUrl = new URL(href);
     const initialState = window.__INITIAL_STATE__ || {};
-    const pageFromUrl = Number(new URL(href).searchParams.get("p"));
+    const pageFromUrl = Number(currentUrl.searchParams.get("p"));
     const loadedPage = Number.isInteger(pageFromUrl) && pageFromUrl > 0 ? pageFromUrl : 1;
     const getPlayerSubtitleEntries = (payload) => {
       let parsedPayload = payload;
@@ -396,8 +397,11 @@ export async function collectSubtitleInPage(requestedPart) {
       });
       return [...merged.values()];
     };
-    const urlBvid = href.match(/\b(BV[0-9A-Za-z]+)\b/i)?.[1] || "";
-    const urlAid = href.match(/\/video\/av(\d+)/i)?.[1] || "";
+    const pathBvid = currentUrl.pathname.match(/\/video\/(BV[0-9A-Za-z]+)/i)?.[1] || "";
+    const queryBvid = String(currentUrl.searchParams.get("bvid") || "").trim();
+    const urlBvid =
+      pathBvid || (/^BV[0-9A-Za-z]+$/i.test(queryBvid) ? queryBvid : "");
+    const urlAid = currentUrl.pathname.match(/\/video\/av(\d+)/i)?.[1] || "";
     const bvid =
       urlBvid ||
       (!urlAid ? initialState.bvid || initialState.videoData?.bvid || "" : "");
