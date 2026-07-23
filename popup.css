@@ -311,6 +311,41 @@ h2 {
   line-height: 1.55;
 }
 
+.asr-panel {
+  display: grid;
+  gap: 8px;
+  border: 1px solid #cfc3f3;
+  border-radius: 10px;
+  padding: 10px;
+  background: var(--violet-light);
+}
+
+.asr-panel strong {
+  font-size: 12px;
+}
+
+.asr-panel p {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.asr-panel progress {
+  width: 100%;
+  height: 8px;
+  accent-color: var(--violet);
+}
+
+.asr-buttons {
+  display: flex;
+  gap: 7px;
+}
+
+.asr-buttons .button {
+  flex: 1;
+}
+
 .transcript {
   max-height: 148px;
   margin: 0;
@@ -354,15 +389,16 @@ h2 {
   white-space: nowrap;
 }
 
-.vault-target button {
-  margin-left: auto;
-  border: 0;
-  padding: 0;
-  color: var(--violet-dark);
-  background: transparent;
-  font: inherit;
-  font-weight: 900;
-  text-decoration: underline;
+.vault-picker-actions {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 7px;
+}
+
+.vault-picker-actions .button {
+  min-height: 30px;
+  font-size: 10px;
 }
 
 .actions .button-obsidian {

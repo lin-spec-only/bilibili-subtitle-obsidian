@@ -60,16 +60,39 @@
 
         <div id="empty-state" class="empty-state" hidden>
           <strong>这个分P没有可用字幕</strong>
-          <p>仅能提取 B 站已提供的官方或 AI 字幕；没有字幕的视频需要另做语音转写。</p>
+          <p>没有发现官方或 AI 字幕，可以使用本机模型转写当前分P音频。</p>
         </div>
+
+        <section id="asr-panel" class="asr-panel" hidden>
+          <div>
+            <strong>本地 AI 转写</strong>
+            <p id="asr-status">音频只在本机处理，首次使用会从 D 盘加载模型。</p>
+          </div>
+          <progress id="asr-progress" max="100" value="0" hidden></progress>
+          <div class="asr-buttons">
+            <button id="start-asr-service" class="button button-secondary" type="button">启动本地服务</button>
+            <button id="start-asr" class="button button-primary" type="button">开始本地转写</button>
+            <button id="cancel-asr" class="button button-ghost" type="button" hidden>取消</button>
+            <button id="stop-asr-service" class="button button-ghost" type="button">关闭本地服务</button>
+          </div>
+        </section>
 
         <pre id="transcript" class="transcript" tabindex="0"></pre>
 
         <div id="actions" class="actions">
           <div class="vault-target">
             <span>保存到</span>
-            <strong id="vault-status">首次添加时选择 Vault 根目录</strong>
-            <button id="change-vault" type="button" hidden>更改</button>
+            <strong id="vault-status">尚未选择保存文件夹</strong>
+          </div>
+          <div class="vault-picker-actions">
+            <button
+              id="change-vault-directory"
+              class="button button-secondary"
+              type="button"
+              hidden
+            >
+              更改保存文件夹
+            </button>
           </div>
           <button id="save-obsidian" class="button button-obsidian" type="button">
             保存到 Obsidian

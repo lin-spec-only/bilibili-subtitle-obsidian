@@ -3,3 +3,7 @@ coverage/
 .DS_Store
 Thumbs.db
 *.zip
+__pycache__/
+*.py[cod]
+.pytest_cache/
+native_host/*.exe

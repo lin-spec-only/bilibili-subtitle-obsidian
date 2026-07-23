@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  buildExtractionScope,
+  doesExtractionStateMatchScope,
   persistExtractionState,
   readPopupState,
   startExtractionState
@@ -31,9 +33,11 @@ function createStorage() {
 
 test("keeps the last input locally but stores extraction results only for this session", async () => {
   const storage = createStorage();
-  await startExtractionState(storage, "  BV1xx411c7mD  ", "2026-07-15T00:00:00.000Z");
+  const scope = buildExtractionScope(42, "https://www.bilibili.com/video/BV1xx411c7mD?p=2", 2);
+  await startExtractionState(storage, "  BV1xx411c7mD  ", "2026-07-15T00:00:00.000Z", scope);
   await persistExtractionState(storage, {
     status: "success",
+    scope,
     result: { tracks: [{ body: [{ from: 0, to: 1, content: "subtitle" }] }] }
   });
 
@@ -45,4 +49,11 @@ test("keeps the last input locally but stores extraction results only for this s
     lastInput: "BV1xx411c7mD",
     extractState: storage.sessionData.extractState
   });
+});
+
+test("matches extraction state only to its original tab and video", () => {
+  const scope = buildExtractionScope(42, "https://www.bilibili.com/video/BV1xx411c7mD", 1);
+  assert.equal(doesExtractionStateMatchScope({ scope }, scope), true);
+  assert.equal(doesExtractionStateMatchScope({ scope }, buildExtractionScope(43, "https://www.bilibili.com/video/BV1xx411c7mD", 1)), false);
+  assert.equal(doesExtractionStateMatchScope({ scope }, buildExtractionScope(42, "https://www.bilibili.com/video/BV1another99", 1)), false);
 });

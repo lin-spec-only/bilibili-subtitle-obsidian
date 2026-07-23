@@ -1,0 +1,9 @@
+{
+  "name": "com.bilibili_subtitle_edge.asr",
+  "description": "Controls the local Bilibili ASR service.",
+  "path": "D:\\BilibiliASR\\native-host\\BilibiliAsrHost.exe",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://bihhhefhgkfgbfecinaibjhkbjdaopcd/"
+  ]
+}

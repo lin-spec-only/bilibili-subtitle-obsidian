@@ -1,14 +1,14 @@
 # B站字幕提取器（Edge）
 
-一个 Edge Manifest V3 扩展：直接读取当前 B站视频的官方或 AI 字幕，并一键添加为 Obsidian Markdown 笔记。
+一个 Edge Manifest V3 扩展：优先读取当前 B站视频的官方或 AI 字幕；没有字幕时可调用本机 Whisper 识别音频，并一键添加为 Obsidian Markdown 笔记。
 
 ## 快速使用
 
 1. 在 Edge 打开 `edge://extensions/`，开启“开发人员模式”，选择“加载解压缩的扩展”，并选中本仓库目录。
 2. 打开任意已加载完成的 B 站视频页，点击工具栏中的“B站字幕提取器”。插件会自动读取当前分 P 的官方或 AI 字幕。
 3. 如有多个分 P 或字幕轨，在弹窗中切换后重新提取；可复制笔记、复制纯文本，或下载 `.md` / `.srt`。
-4. 点击“添加到 Obsidian”。首次可选择 Vault 根目录，或直接选择如 `Sources`、`Inbox` 的子文件夹；选择子文件夹时，再选择它所属的 Vault 根目录。
-5. 第一次跳转时点击“打开 Obsidian”，并在 Edge 提示中允许打开。之后保存会自动打开新建笔记。
+4. 视频没有字幕时，先启动本地 ASR 服务，再点击“开始本地转写”。
+5. 点击“添加到 Obsidian”，直接选择 `Sources` 等最终保存文件夹并确认；插件会立即写入并记住该目录。
 
 生成的笔记使用视频标题命名，包含可播放的 B 站嵌入视频、来源链接、视频信息和带时间轴的原始字幕。Properties 使用 `title`、`source`、`author`、`published`、`created`、`description` 和 `clippings` 标签。
 
@@ -26,43 +26,86 @@
 - 首次选择 Obsidian 目录后，一键新建 Markdown 笔记。
 - 使用 YAML Properties 保存来源、UP主、发布日期、BV号、分P、字幕语言、时长、提取时间和标签。
 - 同名文件自动添加 `-2`、`-3`，不会覆盖已有笔记。
+- 无字幕时使用本地 faster-whisper 转写，支持进度、取消、恢复和字幕缓存。
+
+## 无字幕视频：本地 AI 转写
+
+项目和所有大体积数据均放在 D 盘：
+
+```text
+D:\Projects\bilibili-subtitle-edge    项目源码
+D:\Tech_learn_envs\bilibili-asr       Python 环境
+D:\AI_Models\faster-whisper           Whisper 模型
+D:\BilibiliASR\cache                  转写字幕缓存
+D:\BilibiliASR\tmp                    自动清理的临时音频
+```
+
+首次安装环境，在 PowerShell 运行：
+
+```powershell
+cd D:\Projects\bilibili-subtitle-edge
+powershell -NoProfile -ExecutionPolicy Bypass -File .\setup-asr.ps1
+```
+
+每次需要转写前启动服务，并保持窗口打开：
+
+```powershell
+cd D:\Projects\bilibili-subtitle-edge
+powershell -NoProfile -ExecutionPolicy Bypass -File .\start-asr.ps1
+```
+
+也可以直接双击项目目录中的 `start-asr.cmd`。若服务已经运行，脚本会直接提示，不会重复占用端口。
+
+看到 `Uvicorn running on http://127.0.0.1:8766` 后即可打开扩展。首次真正转写会下载 Whisper `small` 模型到 D 盘，耗时取决于网络；后续复用本地模型和字幕缓存。端口 8765 已被本机其他服务使用，因此本项目固定使用 8766。
+
+默认采用 CPU `int8`，兼容当前电脑的驱动环境。以后升级 NVIDIA 驱动并安装匹配的 CUDA 运行库后，可在启动前设置：
+
+```powershell
+$env:BILIBILI_ASR_DEVICE = "cuda"
+$env:BILIBILI_ASR_COMPUTE_TYPE = "float16"
+.\start-asr.ps1
+```
+
+不要在 CUDA 未配置完成时启用此选项。
 
 ## 安装到 Edge
 
 1. 在 Edge 地址栏打开 `edge://extensions/`。
 2. 打开左侧的“开发人员模式”。
-3. 点击“加载解压缩的扩展”，选择下载或克隆后的仓库根目录（其中必须包含 `manifest.json`）：
+3. 点击“加载解压缩的扩展”，选择 D 盘仓库根目录（其中必须包含 `manifest.json`）：
 
    ```text
-   bilibili-subtitle-edge/
+   D:\Projects\bilibili-subtitle-edge
    ```
 
 4. 将“B站字幕提取器”固定到工具栏。
+
+如果 Edge 仍加载旧的 C 盘版本，请先在扩展卡片中点击“移除”，再加载上述 D 盘目录。确认 D 盘版本 `0.4.6` 可用前，保留 `C:\Users\Lin\Desktop\bilibili-subtitle-edge` 作为回退副本。
 
 当前提供的是“加载解压缩的扩展”安装方式：不需要扩展商店审核，也不会将代码或字幕数据上传到扩展商店。
 
 ## 首次添加到 Obsidian
 
 1. 打开任意 B站视频，点击插件图标，字幕会自动提取。
-2. 点击“添加到 Obsidian”。首次点击会直接弹出目录选择器，请选择 **Obsidian Vault 根目录**：
+2. 点击“添加到 Obsidian”，在系统选择器中直接选择最终保存文件夹，例如：
 
    ```text
-   <你的 Vault>
+   <你的 Vault>\Sources
    ```
 
-   不要选择 Vault 内的 `Sources`、`Inbox` 等子文件夹；插件会检查其中是否存在 `.obsidian`，以避免跳转到不存在的 Vault。
+3. 点击“选择文件夹”确认，笔记会立即写入该目录。保存位置会被记住，以后点击“添加到 Obsidian”即可直接保存。
 
-3. 目录会成为默认保存位置；以后点击“添加到 Obsidian”会直接新建笔记，并打开这篇笔记，无需再设置。
+需要换目录时点击“更改保存文件夹”，选择新的最终目标目录。
 
-选择 Vault 根目录会授予更大的写入范围，但能让插件通过 Obsidian URI 准确打开刚保存的笔记。目录句柄保存在扩展自己的 IndexedDB；代码不遍历目录，也不读取已有笔记。
+插件只保存用户明确选择的目标文件夹句柄，不需要授权整个 Vault，也不遍历目录或读取已有笔记。
 
 ### 保存到 Vault 子文件夹
 
-保存位置可以是 Vault 根目录，也可以是 `Sources`、`Inbox` 等任意子文件夹。首次选择子文件夹后，插件会补充要求选择该文件夹所属的 Vault 根目录，并用目录句柄计算相对路径；不会遍历或读取既有笔记内容。
+直接选择 `Sources`、`Inbox` 或更深的目标子目录即可。浏览器不会向扩展暴露所选目录的完整本地路径或父目录，因此仅选择子目录时，插件负责写入文件但不会自动定位并打开刚保存的 Obsidian 笔记；直接选择 Vault 根目录或保留有旧版 Vault 信息时，仍可自动打开。
 
 ### 首次 Obsidian 跳转授权
 
-首次成功写入笔记后，插件会停留在当前弹窗并显示“打开 Obsidian”。点击该按钮，并在 Edge 的外部应用提示中允许打开；这是浏览器对外部应用调用的首次确认，不能被插件代替。首次点击后弹窗仍会保留，方便完成授权；完成一次后，后续保存会自动跳转到刚创建的笔记并关闭弹窗。
+当插件能够确定 Vault 名称和笔记相对路径时，首次成功写入后会显示“打开 Obsidian”。点击该按钮，并在 Edge 的外部应用提示中允许打开；完成一次后，后续保存会自动跳转。只选择 Vault 子目录时不影响文件保存，但不会显示此跳转。
 
 ## 使用方式
 
@@ -108,12 +151,13 @@ summary: ""
 
 ## 边界与故障排查
 
-- 插件只能提取 B站已经提供的官方或 AI 字幕。视频本身没有字幕时，需要额外做音频下载与语音识别；当前版本不会伪造空字幕。
+- 插件优先提取 B站已经提供的官方或 AI 字幕。视频本身没有字幕时，可由用户主动启动本机语音转写；不会自动上传或后台转写。
 - 会员、课程、地区限制或已失效视频仍受 B站原有访问权限约束。
 - 若提示字幕为空，先在同一 Edge 配置文件中正常打开该视频，确认播放器的 CC 字幕确实存在，然后重试。
 - 插件会区分“视频确实无字幕”和“字幕需要登录态”。后者表示扩展没有从当前 Edge 配置文件获得可用会话，不会自动弹出登录页或复制 Cookie。
 - 若 Obsidian 保存提示需要授权，点击保存区域的“更改”重新选择或授权同一目录；下载 `.md` 始终可作为兜底。
 - 插件不会绕过验证码、风控、登录限制或视频权限。
+- 本地转写服务必须保持运行；若提示无法连接，请运行 `start-asr.ps1`。转写速度取决于视频时长和 CPU 性能。
 
 ## 本地验证
 
@@ -121,6 +165,7 @@ summary: ""
 
 ```powershell
 npm test
+D:\Tech_learn_envs\bilibili-asr\Scripts\python.exe -m unittest discover -s asr_service\tests -v
 node -e "JSON.parse(require('fs').readFileSync('manifest.json', 'utf8')); console.log('manifest.json OK')"
 node --check background.js
 node --check popup.js
@@ -150,6 +195,10 @@ background.js       当前 B站页面读取、字幕下载与本地状态
 popup.html/js/css   字幕提取、预览、复制和保存界面
 lib/core.js         链接、字幕和导出格式的纯函数
 lib/vault.js        目录句柄和安全写入
+asr_service/        本机音频下载、Whisper 转写、任务和缓存服务
+setup-asr.ps1       在 D 盘安装独立 Python 环境
+start-asr.ps1       启动仅监听 127.0.0.1 的本地服务
+start-asr.cmd       可双击的启动入口
 tests/              Node.js 单元测试
 ```
 

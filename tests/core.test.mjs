@@ -16,6 +16,7 @@ import {
   normalizeCues,
   normalizeVideoInput,
   sanitizeFilename,
+  selectPreferredSubtitleTrackIndex,
   toUserErrorMessage
 } from "../lib/core.js";
 
@@ -29,6 +30,16 @@ test("detects whether a subtitle track has exportable cues", () => {
     false
   );
   assert.equal(hasUsableSubtitleContent({ body: [] }), false);
+});
+
+test("defaults to an exportable Chinese subtitle track", () => {
+  const tracks = [
+    { language: "en-US", languageLabel: "English", body: [{ from: 0, to: 1, content: "Hello" }] },
+    { language: "zh-CN", languageLabel: "中文（自动生成）", body: [{ from: 0, to: 1, content: "你好" }] },
+    { language: "ja-JP", languageLabel: "日本語", body: [{ from: 0, to: 1, content: "こんにちは" }] }
+  ];
+  assert.equal(selectPreferredSubtitleTrackIndex(tracks), 1);
+  assert.equal(selectPreferredSubtitleTrackIndex([tracks[0]]), 0);
 });
 
 test("accepts only video pages for the current-tab shortcut", () => {

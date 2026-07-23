@@ -6,6 +6,7 @@ import {
   buildSrt,
   buildTimestampText,
   hasUsableSubtitleContent,
+  selectPreferredSubtitleTrackIndex,
   normalizeVideoInput,
   isSupportedBilibiliVideoInput,
   toUserErrorMessage
@@ -25,9 +26,18 @@ import {
   approveObsidianAutoOpen,
   hasObsidianAutoOpenApproval
 } from "./lib/obsidian-handoff.js";
-import { readPopupState } from "./lib/extract-state.js";
+import { buildExtractionScope, doesExtractionStateMatchScope, readPopupState } from "./lib/extract-state.js";
+import {
+  mergeLocalAsrTrack,
+  transcriptionIdentity
+} from "./lib/local-asr.js";
 
 const EXTRACT_MESSAGE = "extract-bilibili-subtitle";
+const START_ASR_MESSAGE = "start-local-asr";
+const GET_ASR_MESSAGE = "get-local-asr";
+const CANCEL_ASR_MESSAGE = "cancel-local-asr";
+const CONTROL_ASR_SERVICE_MESSAGE = "control-local-asr-service";
+const LOCAL_ASR_STATE_KEY = "localAsrState";
 let currentResult = null;
 let currentTrack = null;
 let extracting = false;
@@ -37,6 +47,9 @@ let vaultRootDirectory = null;
 let vaultRelativePath = "";
 let savingToObsidian = false;
 let pendingObsidianUri = "";
+let activeAsrJobId = "";
+let activeAsrIdentity = "";
+let asrPollTimer = null;
 
 const elements = {
   form: document.querySelector("#extract-form"),
@@ -51,6 +64,13 @@ const elements = {
   languageField: document.querySelector("#language-field"),
   languageSelect: document.querySelector("#language-select"),
   emptyState: document.querySelector("#empty-state"),
+  asrPanel: document.querySelector("#asr-panel"),
+  asrStatus: document.querySelector("#asr-status"),
+  asrProgress: document.querySelector("#asr-progress"),
+  startAsr: document.querySelector("#start-asr"),
+  startAsrService: document.querySelector("#start-asr-service"),
+  cancelAsr: document.querySelector("#cancel-asr"),
+  stopAsrService: document.querySelector("#stop-asr-service"),
   transcript: document.querySelector("#transcript"),
   actions: document.querySelector("#actions"),
   actionFeedback: document.querySelector("#action-feedback"),
@@ -61,7 +81,7 @@ const elements = {
   downloadMarkdown: document.querySelector("#download-markdown"),
   downloadSrt: document.querySelector("#download-srt"),
   vaultStatus: document.querySelector("#vault-status"),
-  changeVault: document.querySelector("#change-vault")
+  changeVaultDirectory: document.querySelector("#change-vault-directory")
 };
 
 elements.form.addEventListener("submit", (event) => {
@@ -102,13 +122,19 @@ elements.downloadSrt.addEventListener("click", () => {
 });
 elements.saveObsidian.addEventListener("click", saveToObsidian);
 elements.openObsidian.addEventListener("click", openSavedNoteInObsidian);
-elements.changeVault.addEventListener("click", () => chooseDefaultVaultDirectory());
+elements.changeVaultDirectory.addEventListener("click", () => chooseVaultSaveDirectory());
+elements.startAsr.addEventListener("click", startLocalTranscription);
+elements.startAsrService.addEventListener("click", () => controlAsrService("start"));
+elements.cancelAsr.addEventListener("click", cancelLocalTranscription);
+elements.stopAsrService.addEventListener("click", () => controlAsrService("stop"));
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName !== "session" || !changes.extractState?.newValue) {
     return;
   }
-  applyExtractState(changes.extractState.newValue);
+  if (doesExtractionStateMatchScope(changes.extractState.newValue, currentExtractionScope())) {
+    applyExtractState(changes.extractState.newValue);
+  }
 });
 
 initialize().catch((error) => showStatus(toUserErrorMessage(error), "error"));
@@ -132,7 +158,7 @@ async function initialize() {
   if (stored.lastInput) {
     elements.url.value = stored.lastInput;
   }
-  if (stored.extractState) {
+  if (stored.extractState && doesExtractionStateMatchScope(stored.extractState, currentExtractionScope())) {
     applyExtractState(stored.extractState);
   }
 }
@@ -185,6 +211,10 @@ async function getActiveVideo() {
   return { tabId: tab.id, url: normalizeVideoInput(sourceUrl) };
 }
 
+function currentExtractionScope() {
+  return buildExtractionScope(activeVideoTabId, elements.url.value);
+}
+
 function applyExtractState(state) {
   if (state?.status === "loading") {
     setExtracting(true);
@@ -221,6 +251,7 @@ function renderResult(result) {
   );
 
   const tracks = Array.isArray(result.tracks) ? result.tracks : [];
+  configureAsrPanel(result, tracks);
   if (!tracks.length) {
     currentTrack = null;
     elements.languageField.hidden = true;
@@ -236,7 +267,7 @@ function renderResult(result) {
     } else {
       elements.emptyState.querySelector("strong").textContent = "这个分P没有可用字幕";
       elements.emptyState.querySelector("p").textContent =
-        "仅能提取 B站已提供的官方或 AI 字幕；没有字幕的视频需要另做语音转写。";
+        "没有发现官方或 AI 字幕，可以使用本机模型转写当前分P音频。";
       showStatus("视频信息已读取，但这个分P没有发现官方或 AI 字幕。", "info");
     }
     return;
@@ -252,9 +283,167 @@ function renderResult(result) {
       value: index,
       label: `${track.languageLabel}${track.isAi ? " · AI" : ""}${track.error ? " · 获取失败" : ""}`
     })),
-    Math.max(0, tracks.findIndex((track) => Array.isArray(track.body) && track.body.length))
+    selectPreferredSubtitleTrackIndex(tracks)
   );
   renderSelectedTrack(Number(elements.languageSelect.value));
+}
+
+function configureAsrPanel(result, tracks) {
+  const hasUsableTrack = tracks.some(hasUsableSubtitleContent);
+  const eligible = !hasUsableTrack && result.subtitleStatus !== "login-required";
+  elements.asrPanel.hidden = !eligible;
+  if (!eligible) {
+    stopAsrPolling();
+    return;
+  }
+  const hasAudio = Array.isArray(result?.audio?.urls) && result.audio.urls.length > 0;
+  elements.startAsr.disabled = !hasAudio;
+  elements.asrStatus.textContent = hasAudio
+    ? "音频只在本机处理；首次转写会下载 Whisper small 模型到 D 盘。"
+    : result.audioError || "没有取得当前分P的音频地址";
+  resumeLocalTranscription(result).catch((error) => {
+    elements.asrStatus.textContent = error?.message || String(error);
+  });
+}
+
+async function startLocalTranscription() {
+  if (!currentResult || activeAsrJobId) {
+    return;
+  }
+  setAsrBusy(true, "正在连接本地转写服务…", 0);
+  try {
+    await controlAsrService("start", true);
+    const response = await chrome.runtime.sendMessage({
+      type: START_ASR_MESSAGE,
+      result: currentResult
+    });
+    if (!response?.ok) {
+      throw new Error(response?.error || "无法启动本地转写");
+    }
+    activeAsrJobId = response.result.id;
+    activeAsrIdentity = transcriptionIdentity(currentResult);
+    await chrome.storage.session.set({
+      [LOCAL_ASR_STATE_KEY]: {
+        jobId: activeAsrJobId,
+        identity: activeAsrIdentity
+      }
+    });
+    await pollLocalTranscription();
+  } catch (error) {
+    activeAsrJobId = "";
+    setAsrBusy(false, error?.message || String(error), 0);
+  }
+}
+
+async function resumeLocalTranscription(result) {
+  if (activeAsrJobId) {
+    return;
+  }
+  const stored = await chrome.storage.session.get(LOCAL_ASR_STATE_KEY);
+  const state = stored?.[LOCAL_ASR_STATE_KEY];
+  if (!state?.jobId || state.identity !== transcriptionIdentity(result)) {
+    return;
+  }
+  activeAsrJobId = state.jobId;
+  activeAsrIdentity = state.identity;
+  setAsrBusy(true, "正在恢复本地转写任务…", 0);
+  await pollLocalTranscription();
+}
+
+async function pollLocalTranscription() {
+  if (!activeAsrJobId) {
+    return;
+  }
+  const response = await chrome.runtime.sendMessage({
+    type: GET_ASR_MESSAGE,
+    jobId: activeAsrJobId
+  });
+  if (!response?.ok) {
+    throw new Error(response?.error || "无法读取本地转写进度");
+  }
+  const job = response.result;
+  const percent = Math.round(Number(job.progress || 0) * 100);
+  setAsrBusy(!["completed", "failed", "cancelled"].includes(job.status), job.message || "正在转写", percent);
+  if (job.status === "completed") {
+    if (activeAsrIdentity !== transcriptionIdentity(currentResult)) {
+      activeAsrJobId = "";
+      activeAsrIdentity = "";
+      await chrome.storage.session.remove(LOCAL_ASR_STATE_KEY);
+      setAsrBusy(false, "转写已完成，但当前已切换到其他分P，请切回原分P读取缓存。", percent);
+      return;
+    }
+    const merged = mergeLocalAsrTrack(currentResult, job.result?.track);
+    activeAsrJobId = "";
+    activeAsrIdentity = "";
+    await chrome.storage.session.remove(LOCAL_ASR_STATE_KEY);
+    await chrome.storage.session.set({
+      extractState: {
+        status: "success",
+        completedAt: new Date().toISOString(),
+        result: merged
+      }
+    });
+    renderResult(merged);
+    await controlAsrService("stop", true);
+    return;
+  }
+  if (job.status === "failed" || job.status === "cancelled") {
+    activeAsrJobId = "";
+    activeAsrIdentity = "";
+    await chrome.storage.session.remove(LOCAL_ASR_STATE_KEY);
+    setAsrBusy(false, job.error || job.message || "本地转写未完成", percent);
+    return;
+  }
+  stopAsrPolling();
+  asrPollTimer = window.setTimeout(() => {
+    pollLocalTranscription().catch((error) => {
+      activeAsrJobId = "";
+      setAsrBusy(false, error?.message || String(error), percent);
+    });
+  }, 1_500);
+}
+
+async function controlAsrService(action, quiet = false) {
+  const response = await chrome.runtime.sendMessage({
+    type: CONTROL_ASR_SERVICE_MESSAGE,
+    action
+  });
+  if (!response?.ok) {
+    throw new Error(response?.error || "本地服务控制失败");
+  }
+  if (!quiet) {
+    elements.asrStatus.textContent = response.result?.message || (action === "start" ? "本地服务已启动" : "本地服务已关闭");
+  }
+  return response.result;
+}
+
+async function cancelLocalTranscription() {
+  if (!activeAsrJobId) {
+    return;
+  }
+  const jobId = activeAsrJobId;
+  stopAsrPolling();
+  const response = await chrome.runtime.sendMessage({ type: CANCEL_ASR_MESSAGE, jobId });
+  activeAsrJobId = "";
+  activeAsrIdentity = "";
+  await chrome.storage.session.remove(LOCAL_ASR_STATE_KEY);
+  setAsrBusy(false, response?.ok ? "转写已取消" : response?.error || "取消失败", 0);
+}
+
+function setAsrBusy(busy, message, percent) {
+  elements.startAsr.disabled = busy || !(currentResult?.audio?.urls?.length > 0);
+  elements.partSelect.disabled = busy || extracting;
+  elements.cancelAsr.hidden = !busy;
+  elements.asrProgress.hidden = !busy;
+  elements.asrProgress.value = Math.max(0, Math.min(100, Number(percent) || 0));
+  elements.asrStatus.textContent = message;
+}
+
+function stopAsrPolling() {
+  if (asrPollTimer) {
+    clearTimeout(asrPollTimer);
+    asrPollTimer = null;
+  }
 }
 
 function renderSelectedTrack(index) {
@@ -293,16 +482,13 @@ async function saveToObsidian() {
   try {
     const destination = await ensureVaultDestination({ quiet: true });
     if (!destination) {
-      showActionFeedback("请选择保存位置后再添加到 Obsidian", "error");
+      showActionFeedback("未选择保存文件夹", "error");
       setSavingToObsidian(false);
       return;
     }
     const { directory, vaultRoot, relativePath } = destination;
-    const [directoryPermission, rootPermission] = await Promise.all([
-      requestDirectoryPermission(directory),
-      requestDirectoryPermission(vaultRoot)
-    ]);
-    if (directoryPermission !== "granted" || rootPermission !== "granted") {
+    const directoryPermission = await requestDirectoryPermission(directory);
+    if (directoryPermission !== "granted") {
       throw new Error("没有获得所选目录的写入权限");
     }
     const filename = buildObsidianNoteFilename(currentResult);
@@ -311,9 +497,22 @@ async function saveToObsidian() {
       filename,
       buildMarkdown(currentResult, currentTrack)
     );
-    const notePath = [relativePath, savedFilename].filter(Boolean).join("/");
-    const obsidianUri = buildObsidianOpenUri(vaultRoot.name, notePath);
+    const notePath = vaultRoot
+      ? [relativePath, savedFilename].filter(Boolean).join("/")
+      : `${directory.name}/${savedFilename}`;
     await refreshVaultStatus();
+    if (!vaultRoot) {
+      pendingObsidianUri = "";
+      elements.openObsidian.hidden = true;
+      showActionFeedback(`已保存到 ${notePath}`, "success");
+      setSavingToObsidian(false);
+      elements.saveObsidian.disabled = true;
+      elements.changeVaultDirectory.disabled = true;
+      elements.saveObsidian.textContent = "已保存";
+      return;
+    }
+
+    const obsidianUri = buildObsidianOpenUri(vaultRoot.name, notePath);
     if (await hasObsidianAutoOpenApproval(chrome.storage)) {
       showActionFeedback(`已添加到 ${notePath}，正在打开 Obsidian`, "success");
       openObsidianUri(obsidianUri, { closePopup: true });
@@ -328,10 +527,10 @@ async function saveToObsidian() {
     );
     setSavingToObsidian(false);
     elements.saveObsidian.disabled = true;
-    elements.changeVault.disabled = true;
+    elements.changeVaultDirectory.disabled = true;
     elements.saveObsidian.textContent = "已添加";
   } catch (error) {
-    showActionFeedback(`${error?.message || error}；可点击“更改”重新选择目录`, "error");
+    showActionFeedback(`${error?.message || error}；请重新点击“添加到 Obsidian”选择目录`, "error");
     setSavingToObsidian(false);
   }
 }
@@ -358,68 +557,65 @@ function openObsidianUri(uri, { closePopup }) {
 function setSavingToObsidian(value) {
   savingToObsidian = value;
   elements.saveObsidian.disabled = value;
-  elements.changeVault.disabled = value;
+  elements.changeVaultDirectory.disabled = value;
   elements.openObsidian.disabled = value;
   elements.saveObsidian.textContent = value ? "正在添加…" : "添加到 Obsidian";
 }
 
-async function chooseDefaultVaultDirectory({ quiet = false } = {}) {
-  if (typeof window.showDirectoryPicker !== "function") {
-    showActionFeedback("当前 Edge 版本不支持选择保存目录，请更新后重试", "error");
-    return null;
-  }
-  try {
-    showActionFeedback("请选择保存位置：可选 Vault 根目录或其中任意子文件夹", "info");
-    const directory = await window.showDirectoryPicker({
-      id: OBSIDIAN_DIRECTORY_PICKER_ID,
-      mode: "readwrite",
-      startIn: "documents"
-    });
-    if (await isObsidianVaultRoot(directory)) {
-      return saveVaultDestination(directory, directory, "", quiet);
-    }
-    return chooseVaultRootForDirectory(directory, quiet);
-  } catch (error) {
-    if (error?.name !== "AbortError" && !quiet) {
-      showActionFeedback(error?.message || "选择保存目录失败", "error");
-    }
-    return null;
-  }
-}
-
 async function ensureVaultDestination({ quiet = false } = {}) {
-  if (vaultDirectory && vaultRootDirectory) {
+  if (vaultDirectory) {
     return {
       directory: vaultDirectory,
       vaultRoot: vaultRootDirectory,
       relativePath: vaultRelativePath
     };
   }
-  if (vaultDirectory) {
-    const permission = await requestDirectoryPermission(vaultDirectory);
-    if (permission !== "granted") {
-      throw new Error("没有获得所选保存目录的写入权限");
-    }
-    if (await isObsidianVaultRoot(vaultDirectory)) {
-      return saveVaultDestination(vaultDirectory, vaultDirectory, "", quiet);
-    }
-    return chooseVaultRootForDirectory(vaultDirectory, quiet);
-  }
-  return chooseDefaultVaultDirectory({ quiet });
+  return chooseVaultSaveDirectory({ quiet });
 }
 
-async function chooseVaultRootForDirectory(directory, quiet) {
-  showActionFeedback(`已选择 ${directory.name}。请再选择它所属的 Obsidian Vault 根目录`, "info");
-  const vaultRoot = await window.showDirectoryPicker({
-    id: "bili-vault-root",
-    mode: "readwrite",
-    startIn: "documents"
-  });
-  if (!(await isObsidianVaultRoot(vaultRoot))) {
-    throw new Error("请选择包含 .obsidian 文件夹的 Obsidian Vault 根目录");
+async function chooseVaultSaveDirectory({ quiet = false } = {}) {
+  if (typeof window.showDirectoryPicker !== "function") {
+    showActionFeedback("当前 Edge 版本不支持选择保存目录，请更新后重试", "error");
+    return null;
   }
-  const relativePath = await resolveVaultRelativePath(vaultRoot, directory);
-  return saveVaultDestination(directory, vaultRoot, relativePath, quiet);
+  try {
+    showActionFeedback("请选择要直接保存笔记的文件夹", "info");
+    const directory = await window.showDirectoryPicker({
+      id: OBSIDIAN_DIRECTORY_PICKER_ID,
+      mode: "readwrite",
+      startIn: vaultDirectory || vaultRootDirectory || "documents"
+    });
+    if (directory.name.toLowerCase() === ".obsidian") {
+      throw new Error("不能把笔记保存到 .obsidian 配置目录");
+    }
+    const permission = await requestDirectoryPermission(directory);
+    if (permission !== "granted") {
+      throw new Error("没有获得所选保存文件夹的写入权限");
+    }
+
+    let vaultRoot = null;
+    let relativePath = "";
+    if (await isObsidianVaultRoot(directory)) {
+      vaultRoot = directory;
+    } else if (vaultRootDirectory) {
+      try {
+        relativePath = await resolveVaultRelativePath(vaultRootDirectory, directory);
+        vaultRoot = vaultRootDirectory;
+      } catch {
+        // File System Access API 不提供父目录；新选的子目录仍可直接写入。
+      }
+    }
+    return saveVaultDestination(directory, vaultRoot, relativePath, quiet);
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      return null;
+    }
+    if (quiet) {
+      throw error;
+    }
+    showActionFeedback(error?.message || "选择保存文件夹失败", "error");
+    return null;
+  }
 }
 
 async function saveVaultDestination(directory, vaultRoot, relativePath, quiet) {
@@ -429,7 +625,9 @@ async function saveVaultDestination(directory, vaultRoot, relativePath, quiet) {
   vaultRelativePath = relativePath;
   await refreshVaultStatus();
   if (!quiet) {
-    const location = relativePath ? `${vaultRoot.name}/${relativePath}` : vaultRoot.name;
+    const location = vaultRoot
+      ? (relativePath ? `${vaultRoot.name}/${relativePath}` : vaultRoot.name)
+      : directory.name;
     showActionFeedback(`默认保存位置已设为 ${location}`, "success");
   }
   return { directory, vaultRoot, relativePath };
@@ -443,38 +641,29 @@ async function refreshVaultStatus() {
     vaultRootDirectory = destination.vaultRoot;
     vaultRelativePath = destination.relativePath;
     if (!directory) {
-      elements.vaultStatus.textContent = "首次添加时选择保存位置";
-      elements.changeVault.hidden = true;
+      elements.vaultStatus.textContent = "尚未选择保存文件夹";
+      elements.changeVaultDirectory.hidden = true;
+      elements.changeVaultDirectory.disabled = false;
       return;
     }
-    if (!vaultRootDirectory) {
-      const permission = await getDirectoryPermission(directory);
-      if (permission === "granted" && (await isObsidianVaultRoot(directory))) {
-        await saveVaultDestination(directory, directory, "", true);
-        return;
-      }
-      elements.vaultStatus.textContent = `${directory.name}（请选择所属 Vault）`;
-      elements.changeVault.hidden = false;
-      return;
-    }
-    const [directoryPermission, rootPermission] = await Promise.all([
-      getDirectoryPermission(directory),
-      getDirectoryPermission(vaultRootDirectory)
-    ]);
-    const location = vaultRelativePath
+    const directoryPermission = await getDirectoryPermission(directory);
+    const location = vaultRootDirectory && vaultRelativePath
       ? `${vaultRootDirectory.name}/${vaultRelativePath}`
-      : vaultRootDirectory.name;
+      : directory.name;
     elements.vaultStatus.textContent =
-      directoryPermission === "granted" && rootPermission === "granted"
+      directoryPermission === "granted"
         ? location
         : `${location}（保存时授权）`;
-    elements.changeVault.hidden = false;
+    elements.changeVaultDirectory.hidden = false;
+    elements.changeVaultDirectory.textContent = "更改保存文件夹";
+    elements.changeVaultDirectory.disabled = false;
   } catch {
     vaultDirectory = null;
     vaultRootDirectory = null;
     vaultRelativePath = "";
     elements.vaultStatus.textContent = "保存位置状态不可用";
-    elements.changeVault.hidden = true;
+    elements.changeVaultDirectory.hidden = true;
+    elements.changeVaultDirectory.disabled = false;
   }
 }
 
@@ -518,7 +707,7 @@ function setExtracting(value) {
   extracting = value;
   elements.extractButton.disabled = value;
   elements.extractButton.textContent = value ? "提取中" : "提取";
-  elements.partSelect.disabled = value;
+  elements.partSelect.disabled = value || Boolean(activeAsrJobId);
 }
 
 function showStatus(message, kind) {
